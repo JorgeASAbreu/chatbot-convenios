@@ -30,7 +30,19 @@ def parse_deterministic(question: str) -> IntentClassification | None:
         (Intent.PM6, ("pm/6", "pm6")),
         (Intent.PROVIDENCIAS, ("providencia", "providencias")),
     )
-    for intent, needles in rules:
-        if any(needle in text for needle in needles):
-            return IntentClassification(intent=intent, confidence=1.0)
+    matches = [intent for intent, needles in rules if any(needle in text for needle in needles)]
+    # Pedido analítico, comparação ou dois domínios requer plano multi-tool, não atalho por keyword.
+    compound_cues = (
+        "analise",
+        "resumo",
+        "panorama",
+        "compar",
+        "pontos de atencao",
+        "como anda",
+        "visao geral",
+    )
+    if len(set(matches)) != 1 or any(cue in text for cue in compound_cues):
+        return None
+    if matches:
+        return IntentClassification(intent=matches[0], confidence=1.0)
     return None

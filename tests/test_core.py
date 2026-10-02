@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -50,12 +50,22 @@ def fixture(s):
                 concedente="PREFEITURA MUNICIPAL PIRAPORA",
                 objeto="cooperação",
                 situacao_fonte="VIGENTE",
-                termino_vigencia=date.today() - timedelta(days=1),
+                inicio_vigencia=date(2021, 6, 11),
+                termino_vigencia=date(2026, 9, 11),
+                valor_proponente_r=Decimal("104000.00"),
+                valor_concedente_r=Decimal("520000.00"),
+                valor_total_convenio_r=Decimal("624000.00"),
                 source_row_hash="c",
             ),
         ]
     )
-    for n, v in enumerate([Decimal("440000"), Decimal("80000"), Decimal("24204.43")]):
+    for n, (v, tipo) in enumerate(
+        [
+            (Decimal("440000"), "Receita Corrente"),
+            (Decimal("80000"), "Receita de Capital"),
+            (Decimal("24204.43"), "Rendimentos financeiros"),
+        ]
+    ):
         s.add(
             ArrecadacaoRaw(
                 snapshot_id=1,
@@ -65,6 +75,7 @@ def fixture(s):
                 source_row_hash=str(n),
                 no_siafi="9282916",
                 receita_arrecadada_r=v,
+                tipo_de_receita=tipo,
             )
         )
     s.add(
@@ -108,4 +119,4 @@ def test_concedente_normalizado_e_vigencia():
     fixture(s)
     c = ConvenioService(s).por_concedente("prefeitura municipal pirapora")[0]
     assert c.codigo_siafi == "9282916"
-    assert ConvenioService.situacao(c) == ("VENCIDO", True)
+    assert ConvenioService.situacao(c) == ("ENCERRADA", True)

@@ -139,12 +139,12 @@ class DadosMGSyncService:
                 valor_total_convenio_r=val(field(row, "valor_total_convenio_r")),
             )
             c.situacao_temporal_calculada = (
-                "VENCIDO"
+                "ENCERRADA"
                 if c.termino_vigencia and c.termino_vigencia < date.today()
                 else c.situacao_fonte
             )
             c.alerta_inconsistencia = (
-                c.situacao_fonte == "VIGENTE" and c.situacao_temporal_calculada == "VENCIDO"
+                c.situacao_fonte == "VIGENTE" and c.situacao_temporal_calculada == "ENCERRADA"
             )
             self.db.add(c)
         elif kind == "arrecadacao":

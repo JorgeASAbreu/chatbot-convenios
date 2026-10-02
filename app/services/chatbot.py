@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -88,15 +89,16 @@ class ChatService:
             composed = self.llm.compose(
                 ComposeContext(question=pergunta, siafi_ativo=convenio.codigo_siafi, facts=facts)
             )
+            safe_text = self._validated_composition(composed.text, facts)
             details = {
                 "plan": plan.model_dump(mode="json"),
                 "tools": [x.value for x in facts.tools_executed],
                 "facts": facts.model_dump(mode="json"),
                 "provider": self.llm.name,
-                "compose": bool(composed.text),
+                "compose": safe_text == composed.text and bool(composed.text),
             }
             return ChatResponse(
-                composed.text or self._facts_template(facts),
+                safe_text or self._facts_template(facts),
                 convenio.codigo_siafi,
                 details,
                 composed.warning or warning,
@@ -104,14 +106,152 @@ class ChatService:
         return self._execute(intent, convenio, warning)
 
     @staticmethod
+    def _validated_composition(text: str | None, facts) -> str | None:
+        """Rejeita números que pareçam valores, datas ou identificadores não consultados."""
+        if not text or not text.strip():
+            return None
+
+        allowed_amounts: set[str] = set()
+        allowed_dates: set[str] = set()
+
+        def collect(value):
+            if isinstance(value, Decimal):
+                allowed_amounts.add(moeda(value))
+                allowed_amounts.add(moeda(value.quantize(Decimal("0.01"))))
+            elif isinstance(value, (date, datetime)):
+                allowed_dates.add(value.strftime("%d/%m/%Y"))
+            elif isinstance(value, dict):
+                for child in value.values():
+                    collect(child)
+            elif isinstance(value, (list, tuple)):
+                for child in value:
+                    collect(child)
+
+        collect(facts.facts)
+        allowed_amounts.update(
+            moeda(value)
+            for value in (
+                facts.percentual_receitas_pactuadas_sobre_liquidado,
+                facts.percentual_receitas_totais_sobre_liquidado,
+            )
+            if value is not None
+        )
+        for amount in re.findall(r"R\$\s*[\d.]+,\d{2}", text):
+            normalized = "R$ " + amount.split("R$", 1)[1].strip()
+            if normalized not in allowed_amounts:
+                return None
+        for percent in re.findall(r"\b\d+(?:[.,]\d+)?\s*%", text):
+            number = percent.replace("%", "").strip()
+            if "," in number:
+                number = number.replace(".", "").replace(",", ".")
+            try:
+                value = Decimal(number).quantize(Decimal("0.01"))
+            except Exception:
+                return None
+            allowed_percentages = {
+                candidate.quantize(Decimal("0.01"))
+                for candidate in (
+                    facts.percentual_receitas_pactuadas_sobre_liquidado,
+                    facts.percentual_receitas_totais_sobre_liquidado,
+                )
+                if candidate is not None
+            }
+            if value not in allowed_percentages:
+                return None
+        for mentioned_date in re.findall(r"\b\d{2}/\d{2}/\d{4}\b", text):
+            if mentioned_date not in allowed_dates:
+                return None
+        siafis = re.findall(r"\b\d{7,}\b", text)
+        if any(siafi != facts.siafi for siafi in siafis):
+            return None
+        return text.strip()
+
+    @staticmethod
     def _facts_template(facts) -> str:
-        financial = facts.facts.get("EXECUCAO_FINANCEIRA") or facts.facts.get("ARRECADACAO")
-        if financial:
-            text = f"Resumo do SIAFI {facts.siafi}: arrecadado {moeda(financial['arrecadado'])}, empenhado {moeda(financial['empenhado'])}, liquidado {moeda(financial['liquidado'])} e pago {moeda(financial['pago'])}."
-            if facts.percentual_execucao_disponivel:
-                text += f" Percentual arrecadado sobre o liquidado: {facts.percentual_arrecadado_sobre_liquidado.quantize(Decimal('0.01'))}% ."
-            return text
-        return f"Foram consultados dados autorizados do SIAFI {facts.siafi}."
+        basic = facts.facts.get("CONVENIO_BASICO", {})
+        vigencia = facts.facts.get("VIGENCIA", {})
+        arrec = facts.facts.get("ARRECADACAO", {})
+        execucao = facts.facts.get("EXECUCAO_FINANCEIRA", {})
+        pending = facts.facts.get("PENDENCIAS", {})
+        lines = [
+            "### Análise geral do convênio",
+            f"**Convênio:** {basic.get('sigcon') or 'não informado'}",
+            f"**SIAFI:** {facts.siafi}",
+            f"**Concedente:** {basic.get('concedente') or 'não informado'}",
+        ]
+        if vigencia:
+            inicio = vigencia.get("inicio_vigencia")
+            termino = vigencia.get("termino_vigencia")
+            if isinstance(inicio, (date, datetime)):
+                inicio = inicio.strftime("%d/%m/%Y")
+            if isinstance(termino, (date, datetime)):
+                termino = termino.strftime("%d/%m/%Y")
+            lines.extend(
+                [
+                    f"**Vigência:** {inicio or 'não informada'} a {termino or 'não informada'}",
+                    f"Situação registrada na fonte: **{vigencia.get('situacao_fonte') or 'não informada'}**. Situação temporal calculada: **{vigencia.get('situacao_temporal_calculada') or 'não informada'}**.",
+                ]
+            )
+        if arrec or execucao:
+            lines.append("### Valores e execução financeira")
+            values = basic
+            if values.get("valor_total") is not None:
+                lines.append(f"- Valor total do convênio: {moeda(values['valor_total'])}")
+                lines.append(f"- Valor do concedente: {moeda(values.get('valor_concedente'))}")
+                lines.append(f"- Valor do proponente: {moeda(values.get('valor_proponente'))}")
+            if arrec:
+                lines.extend(
+                    [
+                        f"- Arrecadado em receitas pactuadas: {moeda(arrec.get('receitas_pactuadas'))}",
+                        f"- Rendimentos registrados: {moeda(arrec.get('rendimentos'))}",
+                        f"- Total de receitas registradas, incluindo rendimentos: {moeda(arrec.get('receitas_totais_registradas'))}",
+                    ]
+                )
+            if execucao:
+                for label, key in (
+                    ("Empenhado", "empenhado"),
+                    ("Liquidado", "liquidado"),
+                    ("Pago", "pago"),
+                ):
+                    lines.append(f"- {label}: {moeda(execucao.get(key))}")
+        if facts.percentual_execucao_disponivel:
+            percent = facts.percentual_receitas_pactuadas_sobre_liquidado.quantize(Decimal("0.01"))
+            lines.extend(
+                [
+                    "### Percentual de execução",
+                    f"Receitas pactuadas sobre liquidado: **{percent}%**.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "### Percentual de execução",
+                    "O percentual não pode ser calculado porque não há valor liquidado registrado na base consultada.",
+                ]
+            )
+        difference = pending.get("liquidado_nao_pago", execucao.get("liquidado_nao_pago"))
+        if difference is not None:
+            lines.extend(
+                [
+                    "### Diferença entre liquidação e pagamento",
+                    f"Há {moeda(difference)} liquidados que não constam como pagos na base consultada.",
+                ]
+            )
+        attention = []
+        if vigencia.get("alerta_inconsistencia"):
+            attention.append("Há divergência entre a situação da fonte e o término da vigência.")
+        if difference is not None and difference > 0:
+            attention.append(
+                f"Há {moeda(difference)} liquidados que não constam como pagos na base consultada."
+            )
+        if arrec.get("rendimentos"):
+            attention.append(
+                f"Há {moeda(arrec['rendimentos'])} de rendimentos registrados, apresentados separadamente das receitas pactuadas."
+            )
+        if attention:
+            lines.append("### Pontos que merecem atenção")
+            lines.extend(f"- {item}" for item in attention)
+        return "\n\n".join(lines)
 
     def _execute(self, intent: Intent, convenio, warning: str | None) -> ChatResponse:
         resumo = resumo_financeiro(self.db, convenio.codigo_siafi)
@@ -160,21 +300,21 @@ class ChatService:
                     else ""
                 )
             )
-            if resumo.percentual_arrecadado_sobre_liquidado is not None:
-                text += f" Percentual arrecadado sobre liquidado: {resumo.percentual_arrecadado_sobre_liquidado.quantize(Decimal('0.01'))}%."
+            if resumo.percentual_receitas_pactuadas_sobre_liquidado is not None:
+                text += f" Percentual de execução: {resumo.percentual_receitas_pactuadas_sobre_liquidado.quantize(Decimal('0.01'))}%."
         elif intent == Intent.RESUMO_FINANCEIRO:
             text = (
                 f"Resumo: arrecadado {moeda(resumo.arrecadado)}, "
                 f"empenhado {moeda(resumo.empenhado)}, liquidado "
                 f"{moeda(resumo.liquidado)} e pago {moeda(resumo.pago)}."
             )
-            if resumo.percentual_arrecadado_sobre_liquidado is not None:
-                text += f" Percentual arrecadado sobre liquidado: {resumo.percentual_arrecadado_sobre_liquidado.quantize(Decimal('0.01'))}%."
+            if resumo.percentual_receitas_pactuadas_sobre_liquidado is not None:
+                text += f" Percentual de execução: {resumo.percentual_receitas_pactuadas_sobre_liquidado.quantize(Decimal('0.01'))}%."
         elif intent == Intent.PERCENTUAL_EXECUCAO:
-            if resumo.percentual_arrecadado_sobre_liquidado is None:
+            if resumo.percentual_receitas_pactuadas_sobre_liquidado is None:
                 text = "O percentual não pode ser calculado porque não há valor liquidado registrado na base consultada."
             else:
-                text = f"Percentual arrecadado sobre o valor liquidado: {resumo.percentual_arrecadado_sobre_liquidado.quantize(Decimal('0.01'))}%."
+                text = f"Percentual de execução (receitas pactuadas sobre liquidado): {resumo.percentual_receitas_pactuadas_sobre_liquidado.quantize(Decimal('0.01'))}%."
         elif intent in (Intent.PM6, Intent.PROVIDENCIAS):
             controls = (
                 self.db.query(ControleInterno).filter_by(codigo_siafi=convenio.codigo_siafi).all()

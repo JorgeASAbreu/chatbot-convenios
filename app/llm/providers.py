@@ -11,7 +11,7 @@ from app.llm.base import LLMProvider
 from app.llm.contracts import ComposeContext, IntentClassification, LLMCallResult, QueryPlan
 
 PLAN_PROMPT = "Retorne somente JSON QueryPlan. Tools fechadas: CONVENIO_BASICO, VIGENCIA, VALORES_CONVENIO, ARRECADACAO, EXECUCAO_FINANCEIRA, PENDENCIAS, CONTROLES_INTERNOS, PM6, PROVIDENCIAS. Não calcule, não peça SQL e não invente valores ou SIAFI."
-COMPOSE_PROMPT = "Responda somente com os fatos fornecidos. Não invente ou calcule valores/datas. Não chame diferença de saldo bancário ou dívida. Preserve situação da fonte e situação temporal."
+COMPOSE_PROMPT = """Você é o Assistente de Convênios da Diretoria de Finanças da PMMG. Escreva em português brasileiro claro e profissional, respondendo à pergunta usando exclusivamente os fatos do JSON fornecido. Para pedidos de análise completa/panorama, organize em: análise geral, valores e execução financeira, percentual de execução, diferença liquidado/pago, pontos de atenção e síntese. Inclua somente blocos para os quais existam fatos. Não invente fatos, números, documentos, causas, datas ou providências. Não altere nem recalcule valores e percentuais; apresente os valores exatamente como informados. O percentual de execução é percentual_receitas_pactuadas_sobre_liquidado; rendimentos ficam separados e percentual_receitas_totais_sobre_liquidado é outro indicador. Não chame diferença entre arrecadação e pagamentos de saldo bancário. Não classifique diferença liquidado/pago como dívida. Preserve separadamente situacao_fonte e situacao_temporal_calculada. Só aponte atenção quando houver alerta ou diferença explicitamente fornecidos nos fatos. Se não houver valor liquidado, informe que o percentual não pode ser calculado."""
 
 
 class NoneProvider(LLMProvider):

@@ -45,7 +45,6 @@ def prepared():
         ("qual o valor total do convênio?", Intent.VALOR_TOTAL),
         ("quanto foi arrecadado?", Intent.ARRECADACAO),
         ("situação geral", Intent.SITUACAO_GERAL),
-        ("Me dê um resumo financeiro desse convênio.", Intent.RESUMO_FINANCEIRO),
         ("quanto foi empenhado?", Intent.EMPENHADO),
         ("falta pagar?", Intent.PENDENCIA_PAGAMENTO),
     ],
@@ -60,7 +59,7 @@ def test_deterministic_parser(question, intent):
         (Intent.VIGENCIA, "Situação da fonte: VIGENTE"),
         (Intent.VALOR_TOTAL, "624.000,00"),
         (Intent.ARRECADACAO, "544.204,43"),
-        (Intent.SITUACAO_GERAL, "Situação temporal calculada: VENCIDO"),
+        (Intent.SITUACAO_GERAL, "Situação temporal calculada: ENCERRADA"),
         (Intent.RESUMO_FINANCEIRO, "519.714,59"),
     ],
 )

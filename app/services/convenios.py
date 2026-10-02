@@ -30,8 +30,8 @@ class ConvenioService:
 
     @staticmethod
     def situacao(convenio: Convenio) -> tuple[str | None, bool]:
-        vencido = bool(convenio.termino_vigencia and convenio.termino_vigencia < date.today())
+        encerrado = bool(convenio.termino_vigencia and convenio.termino_vigencia < date.today())
         return (
-            "VENCIDO" if vencido else convenio.situacao_fonte,
-            vencido and (convenio.situacao_fonte or "").upper() == "VIGENTE",
+            "ENCERRADA" if encerrado else convenio.situacao_fonte,
+            encerrado and (convenio.situacao_fonte or "").upper() == "VIGENTE",
         )

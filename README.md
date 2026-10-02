@@ -40,7 +40,7 @@ O Planner recebe somente pergunta, SIAFI ativo e catálogo fechado de ferramenta
 
 `llm_usage` registra cada operação `PLAN` e `COMPOSE`, com provedor, modelo, tokens, custo estimado, latência, sucesso, erro, usuário e SIAFI. Para Gemini, o custo é `(tokens_entrada × custo_entrada_por_1M + tokens_saida × custo_saida_por_1M) / 1.000.000`. O alerta de orçamento é emitido em `GEMINI_WARN_THRESHOLD`; o bloqueio só ocorre no teto `GEMINI_BUDGET_USD`.
 
-O indicador denominado percentual de execução nesta aplicação significa estritamente `arrecadado / liquidado × 100`, calculado em Python com `Decimal`. Ele não é calculado pela IA e não é exibido se não houver valor liquidado.
+Os indicadores são calculados em Python com `Decimal`, nunca pela IA. O **percentual de execução** apresentado ao usuário significa estritamente `receitas pactuadas / liquidado × 100`. O sistema também preserva, para explicabilidade, `receitas totais registradas / liquidado × 100`; este segundo inclui rendimentos e não substitui o indicador de execução. Se não houver valor liquidado, ambos são indisponíveis e não ocorre divisão por zero. Situação temporal após a data final é rotulada `ENCERRADA`; a situação oficial permanece separada em `situacao_fonte`.
 
 ## Qualidade e backup
 

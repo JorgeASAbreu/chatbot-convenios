@@ -73,7 +73,8 @@ class FactsBundle(BaseModel):
     siafi: str
     facts: dict[str, dict]
     tools_executed: list[InternalTool]
-    percentual_arrecadado_sobre_liquidado: Decimal | None = None
+    percentual_receitas_pactuadas_sobre_liquidado: Decimal | None = None
+    percentual_receitas_totais_sobre_liquidado: Decimal | None = None
     percentual_execucao_disponivel: bool = False
 
 

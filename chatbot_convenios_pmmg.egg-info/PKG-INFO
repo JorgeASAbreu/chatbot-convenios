@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: chatbot-convenios-pmmg
+Version: 0.1.0
+Requires-Python: >=3.12
+Requires-Dist: streamlit>=1.40
+Requires-Dist: sqlalchemy>=2.0
+Requires-Dist: psycopg[binary]>=3.2
+Requires-Dist: alembic>=1.14
+Requires-Dist: pydantic>=2.10
+Requires-Dist: pydantic-settings>=2.6
+Requires-Dist: httpx>=0.28
+Requires-Dist: bcrypt>=4.2
+Requires-Dist: openai>=1.58
+Requires-Dist: google-genai>=1.0

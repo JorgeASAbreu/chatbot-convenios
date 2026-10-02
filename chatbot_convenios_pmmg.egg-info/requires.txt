@@ -1,0 +1,10 @@
+streamlit>=1.40
+sqlalchemy>=2.0
+psycopg[binary]>=3.2
+alembic>=1.14
+pydantic>=2.10
+pydantic-settings>=2.6
+httpx>=0.28
+bcrypt>=4.2
+openai>=1.58
+google-genai>=1.0

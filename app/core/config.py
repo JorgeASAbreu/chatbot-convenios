@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    database_url: str = "sqlite:///./convenios.db"
+    database_url: str = ""
     app_env: str = "development"
     log_level: str = "INFO"
     llm_provider: Literal["none", "openai", "gemini"] = "none"
@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     gemini_enabled: bool = False
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = ""
     gemini_budget_usd: Decimal = Decimal("5.00")
     gemini_warn_threshold: Decimal = Decimal("0.80")
     gemini_cost_input_per_1m: Decimal = Decimal("0")

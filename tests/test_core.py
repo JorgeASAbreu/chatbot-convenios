@@ -14,6 +14,7 @@ from app.db.models import (
     SourceSnapshot,
     Usuario,
 )
+from app.llm.providers import NoneProvider
 from app.services.chatbot import ChatService
 from app.services.convenios import ConvenioService
 from app.services.financeiro import pendencia_texto, resumo_financeiro
@@ -111,7 +112,7 @@ def test_chat_context():
     s = db()
     fixture(s)
     u = s.get(Usuario, 1)
-    assert "519.714,59" in ChatService(s, u).respond("quanto foi pago?", "9282916").texto
+    assert "519.714,59" in ChatService(s, u, NoneProvider()).respond("quanto foi pago?", "9282916").texto
 
 
 def test_concedente_normalizado_e_vigencia():

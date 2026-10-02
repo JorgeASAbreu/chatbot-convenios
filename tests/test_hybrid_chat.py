@@ -7,7 +7,7 @@ from test_core import db, fixture
 from app.core.config import Settings
 from app.db.models import LlmUsage, Usuario
 from app.llm.contracts import Intent, IntentClassification, LLMCallResult
-from app.llm.providers import GeminiProvider
+from app.llm.providers import GeminiProvider, NoneProvider
 from app.services.chatbot import ChatService
 from app.services.intent_parser import parse_deterministic
 
@@ -82,7 +82,14 @@ def test_llm_fallback_and_active_context(prepared):
 def test_llm_invalid_or_unavailable_falls_back_safely(prepared):
     session, user = prepared
     response = ChatService(session, user, FakeLLM()).respond("pergunta obscura", "9282916")
-    assert "SIAFI 9282916" in response.texto
+    assert "temporariamente indisponível" in response.texto
+
+
+def test_none_provider_does_not_answer_open_question_with_identification_only(prepared):
+    session, user = prepared
+    response = ChatService(session, user, NoneProvider()).respond("como anda esse convênio?", "9282916")
+    assert "fallback determinístico" in response.texto
+    assert "CV 33/2021" not in response.texto
 
 
 def test_gemini_disabled_does_not_call_or_persist(prepared):

@@ -10,8 +10,17 @@ from app.db.models import LlmUsage
 from app.llm.base import LLMProvider
 from app.llm.contracts import ComposeContext, IntentClassification, LLMCallResult, QueryPlan
 
-PLAN_PROMPT = "Retorne somente JSON QueryPlan. Tools fechadas: CONVENIO_BASICO, VIGENCIA, VALORES_CONVENIO, ARRECADACAO, EXECUCAO_FINANCEIRA, PENDENCIAS, CONTROLES_INTERNOS, PM6, PROVIDENCIAS. Não calcule, não peça SQL e não invente valores ou SIAFI."
+PLAN_PROMPT = "Retorne somente JSON QueryPlan. Tools fechadas: CONVENIO_BASICO, VIGENCIA, VALORES_CONVENIO, ARRECADACAO, EXECUCAO_FINANCEIRA, PENDENCIAS, CONTROLES_INTERNOS, PM6, PROVIDENCIAS. Para análise geral ou panorama, solicite CONVENIO_BASICO, VIGENCIA, VALORES_CONVENIO, ARRECADACAO, EXECUCAO_FINANCEIRA e PENDENCIAS. Para pergunta simples, selecione apenas as tools necessárias. Não calcule, não peça SQL e não invente valores ou SIAFI."
 COMPOSE_PROMPT = """Você é o Assistente de Convênios da Diretoria de Finanças da PMMG. Escreva em português brasileiro claro e profissional, respondendo à pergunta usando exclusivamente os fatos do JSON fornecido. Para pedidos de análise completa/panorama, organize em: análise geral, valores e execução financeira, percentual de execução, diferença liquidado/pago, pontos de atenção e síntese. Inclua somente blocos para os quais existam fatos. Não invente fatos, números, documentos, causas, datas ou providências. Não altere nem recalcule valores e percentuais; apresente os valores exatamente como informados. O percentual de execução é percentual_receitas_pactuadas_sobre_liquidado; rendimentos ficam separados e percentual_receitas_totais_sobre_liquidado é outro indicador. Não chame diferença entre arrecadação e pagamentos de saldo bancário. Não classifique diferença liquidado/pago como dívida. Preserve separadamente situacao_fonte e situacao_temporal_calculada. Só aponte atenção quando houver alerta ou diferença explicitamente fornecidos nos fatos. Se não houver valor liquidado, informe que o percentual não pode ser calculado."""
+
+
+def _retryable(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    if status is not None:
+        return status in (429, 500, 502, 503, 504)
+    name = type(exc).__name__.lower()
+    message = str(exc).lower()
+    return isinstance(exc, TimeoutError) or "timeout" in name or "timed out" in message
 
 
 class NoneProvider(LLMProvider):
@@ -91,34 +100,28 @@ class GeminiProvider(UsageTrackedProvider):
         allowed, warning = self._allowed()
         if not allowed:
             return LLMCallResult(warning=warning)
-        started = time.perf_counter()
-        try:
-            from google import genai
+        for attempt in range(3):
+            started = time.perf_counter()
+            try:
+                from google import genai
 
-            r = genai.Client(api_key=self.settings.gemini_api_key).models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json"
-                    if operation == "PLAN"
-                    else "text/plain"
-                },
-            )
-            u = getattr(r, "usage_metadata", None)
-            self._record(
-                operation,
-                int(getattr(u, "prompt_token_count", 0) or 0),
-                int(getattr(u, "candidates_token_count", 0) or 0),
-                int((time.perf_counter() - started) * 1000),
-                True,
-                siafi,
-            )
-            return LLMCallResult(text=getattr(r, "text", ""), warning=warning)
-        except Exception as exc:
-            self._record(
-                operation, 0, 0, int((time.perf_counter() - started) * 1000), False, siafi, str(exc)
-            )
-            return LLMCallResult(warning=warning)
+                client = genai.Client(api_key=self.settings.gemini_api_key)
+                r = client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config={"response_mime_type": "application/json" if operation == "PLAN" else "text/plain"},
+                )
+                u = getattr(r, "usage_metadata", None)
+                self._record(operation, int(getattr(u, "prompt_token_count", 0) or 0),
+                             int(getattr(u, "candidates_token_count", 0) or 0),
+                             int((time.perf_counter() - started) * 1000), True, siafi)
+                return LLMCallResult(text=getattr(r, "text", ""), warning=warning)
+            except Exception as exc:
+                self._record(operation, 0, 0, int((time.perf_counter() - started) * 1000),
+                             False, siafi, str(exc))
+                if not _retryable(exc) or attempt == 2:
+                    return LLMCallResult(warning=warning or "Provedor de IA indisponível após tentativas limitadas.")
+                time.sleep(0.25 * (2 ** attempt))
 
     def plan(self, question, active_siafi):
         x = self._call(
@@ -162,25 +165,20 @@ class OpenAIProvider(GeminiProvider):
     def _call(self, operation, prompt, siafi=None):
         if not self.settings.openai_enabled:
             return LLMCallResult()
-        started = time.perf_counter()
-        try:
-            from openai import OpenAI
+        for attempt in range(3):
+            started = time.perf_counter()
+            try:
+                from openai import OpenAI
 
-            r = OpenAI(api_key=self.settings.openai_api_key).responses.create(
-                model=self.model, input=prompt
-            )
-            u = r.usage
-            self._record(
-                operation,
-                u.input_tokens,
-                u.output_tokens,
-                int((time.perf_counter() - started) * 1000),
-                True,
-                siafi,
-            )
-            return LLMCallResult(text=r.output_text)
-        except Exception as exc:
-            self._record(
-                operation, 0, 0, int((time.perf_counter() - started) * 1000), False, siafi, str(exc)
-            )
-            return LLMCallResult()
+                client = OpenAI(api_key=self.settings.openai_api_key, max_retries=0)
+                r = client.responses.create(model=self.model, input=prompt)
+                u = r.usage
+                self._record(operation, u.input_tokens, u.output_tokens,
+                             int((time.perf_counter() - started) * 1000), True, siafi)
+                return LLMCallResult(text=r.output_text)
+            except Exception as exc:
+                self._record(operation, 0, 0, int((time.perf_counter() - started) * 1000),
+                             False, siafi, str(exc))
+                if not _retryable(exc) or attempt == 2:
+                    return LLMCallResult(warning="Provedor de IA indisponível após tentativas limitadas.")
+                time.sleep(0.25 * (2 ** attempt))

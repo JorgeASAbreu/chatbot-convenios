@@ -2,7 +2,7 @@ import streamlit as st
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.db.models import ConsultaAuditoria, Perfil, Usuario
+from app.db.models import ConsultaAuditoria, LlmUsage, Perfil, Usuario
 from app.db.session import SessionLocal
 from app.services.auth import AuthService
 from app.services.chatbot import ChatService
@@ -124,6 +124,25 @@ def admin_page(user: Usuario, page: str):
             )
         elif page == "Uso de IA":
             st.info("Uso de IA é opcional. O provedor atual é " + get_settings().llm_provider + ".")
+            st.dataframe(
+                [
+                    {
+                        "quando": x.timestamp,
+                        "provider": x.provider,
+                        "model": x.model,
+                        "operation": x.operation,
+                        "input_tokens": x.input_tokens,
+                        "output_tokens": x.output_tokens,
+                        "estimated_cost": x.estimated_cost,
+                        "latency_ms": x.latency_ms,
+                        "success": x.success,
+                        "error": x.error,
+                        "user_id": x.user_id,
+                        "siafi": x.siafi,
+                    }
+                    for x in db.scalars(select(LlmUsage).order_by(LlmUsage.id.desc()).limit(20))
+                ]
+            )
         else:
             st.header(page)
             st.info(

@@ -76,6 +76,7 @@ class FactsBundle(BaseModel):
     percentual_receitas_pactuadas_sobre_liquidado: Decimal | None = None
     percentual_receitas_totais_sobre_liquidado: Decimal | None = None
     percentual_execucao_disponivel: bool = False
+    alertas: list[str] = Field(default_factory=list)
 
 
 class ComposeContext(BaseModel):

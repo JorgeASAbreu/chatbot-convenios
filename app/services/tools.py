@@ -20,6 +20,19 @@ class ToolDispatcher:
         results = [self._one(tool, convenio) for tool in dict.fromkeys(plan.tools)]
         facts = {result.tool.value: result.data for result in results}
         resumo = resumo_financeiro(self.db, siafi)
+        alerts: list[str] = []
+        vigencia = facts.get("VIGENCIA", {})
+        if vigencia.get("alerta_inconsistencia"):
+            alerts.append("SITUACAO_FONTE_DIVERGE_TEMPORAL")
+        if resumo.diferenca_liquidado_pago > 0:
+            alerts.append("LIQUIDADO_MAIOR_QUE_PAGO")
+        if resumo.liquidado == 0:
+            alerts.append("PERCENTUAL_INDISPONIVEL")
+        for tool in (InternalTool.PM6, InternalTool.PROVIDENCIAS, InternalTool.CONTROLES_INTERNOS):
+            if tool in plan.tools:
+                item = facts.get(tool.value, {}).get("informacao_interna")
+                if not item:
+                    alerts.append("CONTROLE_INTERNO_AUSENTE")
         return FactsBundle(
             siafi=siafi,
             facts=facts,
@@ -28,6 +41,7 @@ class ToolDispatcher:
             percentual_receitas_totais_sobre_liquidado=resumo.percentual_receitas_totais_sobre_liquidado,
             percentual_execucao_disponivel=resumo.percentual_receitas_pactuadas_sobre_liquidado
             is not None,
+            alertas=alerts,
         )
 
     def _one(self, tool: InternalTool, convenio) -> ToolResult:

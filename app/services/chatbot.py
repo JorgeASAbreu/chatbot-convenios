@@ -37,35 +37,71 @@ class ChatService:
         self.llm = llm or make_provider(get_settings(), db, usuario.id)
 
     def respond(self, pergunta: str, siafi_ativo: str | None = None) -> ChatResponse:
-        classification = parse_deterministic(pergunta)
+        # Apenas comandos inequívocos e uma seleção SIAFI pura ficam fora da IA.
+        clean_question = pergunta.strip()
+        if clean_question.lower() in {"menu", "ajuda"}:
+            return ChatResponse("Informe uma pergunta sobre o convênio ou um número SIAFI.", siafi_ativo)
+        if re.fullmatch(r"\d{5,}", clean_question):
+            convenio = self.cs.por_siafi(clean_question)
+            if not convenio:
+                return ChatResponse("Convênio não localizado.")
+            if not pode_consultar(self.db, self.usuario, convenio):
+                return ChatResponse("Acesso negado para este convênio.")
+            return ChatResponse(f"SIAFI ativo: {convenio.codigo_siafi} — {convenio.codigo_sigcon or 'sem SIGCON'}.", convenio.codigo_siafi)
+        if clean_question.lower() in {"novo convênio", "novo convenio", "reiniciar", "resetar"}:
+            return ChatResponse("Contexto limpo. Informe o número SIAFI ou o concedente.")
+        siafi_match = re.search(r"(?<!\d)(\d{5,})(?!\d)", clean_question)
+        planner_question = clean_question
+        if siafi_match:
+            siafi_ativo = siafi_match.group(1)
+            planner_question = (clean_question[:siafi_match.start()] + clean_question[siafi_match.end():]).strip(" ,;:-")
+
+        classification = None
         warning = None
         plan = None
-        if not classification:
-            # Planner recebe somente pergunta/SIAFI; fatos só são expostos após autorização.
+        if getattr(self.llm, "name", None) == "none":
+            classification = parse_deterministic(planner_question)
+            if classification is None:
+                return ChatResponse(
+                    "Não consegui interpretar a pergunta pelo fallback determinístico. "
+                    "Faça um pedido objetivo, como 'quanto foi pago?' ou 'qual a vigência?'.",
+                    siafi_ativo,
+                )
+        else:
+            # Toda pergunta de negócio chega primeiro ao Planner, sem fatos.
             llm_result = (
-                self.llm.plan(pergunta, siafi_ativo)
+                self.llm.plan(planner_question, siafi_ativo)
                 if hasattr(self.llm, "plan")
-                else self.llm.classify_intent(pergunta, siafi_ativo)
+                else self.llm.classify_intent(planner_question, siafi_ativo)
             )
             plan, warning = getattr(llm_result, "plan", None), llm_result.warning
+            # Compatibilidade temporária com adaptadores legados e fallback limitado.
             classification = (
                 type("Classification", (), {"intent": plan.intent})
                 if plan
                 else llm_result.classification
             )
+            if not plan and classification is None:
+                classification = parse_deterministic(planner_question)
+            if not plan and classification is None:
+                return ChatResponse(
+                    "A interpretação por IA está temporariamente indisponível. "
+                    "Reformule a pergunta ou informe um pedido objetivo para o fallback.",
+                    siafi_ativo,
+                    warning=warning,
+                )
         intent = classification.intent if classification else Intent.DESCONHECIDA
         if intent == Intent.NOVO_CONVENIO:
             return ChatResponse(
                 "Contexto limpo. Informe o número SIAFI ou o concedente.", warning=warning
             )
-        match = re.search(r"\b\d{5,}\b", pergunta)
         convenio = (
-            self.cs.por_siafi(match.group() if match else siafi_ativo or "")
-            if (match or siafi_ativo)
+            self.cs.por_siafi(siafi_ativo or "")
+            if siafi_ativo
             else None
         )
-        if not convenio and not match and not siafi_ativo:
-            found = self.cs.por_concedente(pergunta)
+        if not convenio and not siafi_ativo:
+            found = self.cs.por_concedente(planner_question)
             if len(found) == 1:
                 convenio = found[0]
             elif len(found) > 1:
@@ -75,6 +111,8 @@ class ChatService:
                     warning=warning,
                 )
         if not convenio:
+            if warning:
+                return ChatResponse("A interpretação por IA está temporariamente indisponível. Informe o número SIAFI ou o nome do concedente para consultar por fallback.", warning=warning)
             return ChatResponse(
                 "Convênio não localizado. Informe o número SIAFI ou o nome do concedente.",
                 warning=warning,
@@ -87,7 +125,7 @@ class ChatService:
             except PermissionError:
                 return ChatResponse("Acesso negado para este convênio.", warning=warning)
             composed = self.llm.compose(
-                ComposeContext(question=pergunta, siafi_ativo=convenio.codigo_siafi, facts=facts)
+                ComposeContext(question=planner_question, siafi_ativo=convenio.codigo_siafi, facts=facts)
             )
             safe_text = self._validated_composition(composed.text, facts)
             details = {
@@ -103,7 +141,10 @@ class ChatService:
                 details,
                 composed.warning or warning,
             )
-        return self._execute(intent, convenio, warning)
+        result = self._execute(intent, convenio, warning)
+        if warning:
+            result.texto = "A interpretação por IA está temporariamente indisponível. Resposta obtida pelo fallback determinístico.\n\n" + result.texto
+        return result
 
     @staticmethod
     def _validated_composition(text: str | None, facts) -> str | None:

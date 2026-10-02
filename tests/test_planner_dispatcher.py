@@ -133,6 +133,45 @@ def test_real_compound_question_bypasses_fast_path_and_consolidates_facts(prepar
     assert facts["siafi"] == "9282916" and facts["percentual_execucao_disponivel"]
 
 
+def test_business_question_with_parser_keyword_still_goes_to_planner(prepared):
+    session, user = prepared
+    fake = PlannerComposerFake(full_analysis_plan())
+    question = "Faça uma análise completa, incluindo o percentual de execução e a vigência."
+    response = ChatService(session, user, fake).respond(question, "9282916")
+    assert [call[0] for call in fake.calls] == ["PLAN", "COMPOSE"]
+    assert fake.calls[0][1] == question
+    assert response.detalhes["plan"]["tools"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "quanto foi pago?",
+        "qual a vigência?",
+        "qual o percentual de execução?",
+        "como anda esse convênio?",
+        "faça uma análise completa",
+        "quanto entrou, foi liquidado e pago?",
+        "faça uma análise completa considerando vigência, arrecadação, empenhado, liquidado, pago, percentual e pendências",
+    ],
+)
+def test_all_business_questions_reach_planner_first(prepared, question):
+    session, user = prepared
+    fake = PlannerComposerFake(full_analysis_plan())
+    ChatService(session, user, fake).respond(question, "9282916")
+    assert [call[0] for call in fake.calls] == ["PLAN", "COMPOSE"]
+    assert fake.calls[0][1] == question
+
+
+def test_siafi_and_business_question_in_same_message(prepared):
+    session, user = prepared
+    fake = PlannerComposerFake(general_plan())
+    response = ChatService(session, user, fake).respond("9282916, quanto foi pago?", None)
+    assert response.siafi == "9282916"
+    assert [call[0] for call in fake.calls] == ["PLAN", "COMPOSE"]
+    assert fake.calls[0][1] == "quanto foi pago?"
+
+
 def test_pirapora_full_analysis_facts_and_composer_semantics(prepared):
     session, user = prepared
     question = (
